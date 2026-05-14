@@ -1,0 +1,107 @@
+{
+  "orgId": "1",
+  "year": "2026",
+  "tournId": "018",
+  "name": "Zurich Classic of New Orleans",
+  "purse": 9500000,
+  "fedexCupPoints": 400,
+  "date": {
+    "start": "2026-04-23T00:00:00",
+    "end": "2026-04-26T00:00:00",
+    "weekNumber": "17"
+  },
+  "format": "team",
+  "status": "Not Started",
+  "currentRound": -1,
+  "timeZone": "America/Chicago",
+  "courses": [
+    {
+      "courseId": "714",
+      "courseName": "TPC Louisiana",
+      "host": "Yes",
+      "location": {
+        "country": "USA",
+        "state": "Louisiana",
+        "city": "Avondale"
+      },
+      "parFrontNine": "36",
+      "parBackNine": "36",
+      "parTotal": "72",
+      "holes": [
+        {
+          "holeId": 1,
+          "par": "4"
+        },
+        {
+          "holeId": 2,
+          "par": "5"
+        },
+        {
+          "holeId": 3,
+          "par": "3"
+        },
+        {
+          "holeId": 4,
+          "par": "4"
+        },
+        {
+          "holeId": 5,
+          "par": "4"
+        },
+        {
+          "holeId": 6,
+          "par": "4"
+        },
+        {
+          "holeId": 7,
+          "par": "5"
+        },
+        {
+          "holeId": 8,
+          "par": "4"
+        },
+        {
+          "holeId": 9,
+          "par": "3"
+        },
+        {
+          "holeId": 10,
+          "par": "4"
+        },
+        {
+          "holeId": 11,
+          "par": "5"
+        },
+        {
+          "holeId": 12,
+          "par": "4"
+        },
+        {
+          "holeId": 13,
+          "par": "4"
+        },
+        {
+          "holeId": 14,
+          "par": "3"
+        },
+        {
+          "holeId": 15,
+          "par": "4"
+        },
+        {
+          "holeId": 16,
+          "par": "4"
+        },
+        {
+          "holeId": 17,
+          "par": "3"
+        },
+        {
+          "holeId": 18,
+          "par": "5"
+        }
+      ]
+    }
+  ],
+  "timestamp": "2026-01-16T15:51:06.048000"
+}
