@@ -84,10 +84,40 @@ const handleScan = async (req, res, next) => {
       });
     }
 
-    // Record the scan (non-fatal if it fails). Capture the User-Agent so
-    // the my-bag history can show which device the tap came from.
+    // Ask Chromium to attach Client Hints on the next request — primes the
+    // browser so a future tap from this device sends Sec-CH-UA-Model. Set
+    // here as well as on the response so the user's next return hit carries
+    // the model even before any cross-origin Permissions-Policy delegation.
+    res.setHeader(
+      'Accept-CH',
+      'Sec-CH-UA-Model, Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version',
+    );
+    res.setHeader('Critical-CH', 'Sec-CH-UA-Model, Sec-CH-UA-Platform-Version');
+
+    // Record the scan (non-fatal if it fails). Capture the User-Agent and
+    // any UA-CH the frontend collected via navigator.userAgentData so the
+    // my-bag history can show "SM-S901B — Android 14" instead of "K — Android".
     try {
-      await recordScan(bag.id, { userAgent: req.headers['user-agent'] });
+      const clientHints = {
+        model:
+          req.headers['x-device-model'] || req.headers['sec-ch-ua-model'] || null,
+        platform:
+          req.headers['x-device-platform'] || req.headers['sec-ch-ua-platform'] || null,
+        platformVersion:
+          req.headers['x-device-platform-version'] ||
+          req.headers['sec-ch-ua-platform-version'] ||
+          null,
+      };
+      logger.info(
+        `Scan headers: xModel=${req.headers['x-device-model'] || 'none'}, ` +
+          `secChModel=${req.headers['sec-ch-ua-model'] || 'none'}, ` +
+          `xPlatform=${req.headers['x-device-platform'] || 'none'}, ` +
+          `xPlatformVer=${req.headers['x-device-platform-version'] || 'none'}`,
+      );
+      await recordScan(bag.id, {
+        userAgent: req.headers['user-agent'],
+        clientHints,
+      });
     } catch (scanError) {
       logger.error(`Non-fatal scan log error: ${scanError.message}`);
     }

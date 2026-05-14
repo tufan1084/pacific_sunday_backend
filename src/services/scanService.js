@@ -7,9 +7,9 @@ const { parseDeviceLabel } = require('../utils/parseDeviceLabel');
  * Captures the User-Agent + a derived friendly label so the my-bag history
  * can show "iPhone — iOS 17" instead of a generic "Device".
  */
-const recordScan = async (bagId, { userAgent } = {}) => {
+const recordScan = async (bagId, { userAgent, clientHints } = {}) => {
   try {
-    const deviceLabel = parseDeviceLabel(userAgent);
+    const deviceLabel = parseDeviceLabel(userAgent, clientHints || {});
     const [scan] = await prisma.$transaction([
       prisma.scan.create({
         data: {

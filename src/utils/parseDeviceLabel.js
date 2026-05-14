@@ -16,7 +16,24 @@ const { UAParser } = require('ua-parser-js');
  * Returns null if the UA is missing or so generic that no useful label can
  * be derived; callers should fall back to "Unknown device".
  */
-function parseDeviceLabel(userAgent) {
+function parseDeviceLabel(userAgent, hints = {}) {
+  // Prefer UA-CH high-entropy values when the client supplied them — those
+  // carry the real model name on modern Chromium where the User-Agent has
+  // been reduced to "Android 10; K". Strip any surrounding quotes that
+  // Sec-CH-UA-* headers ship with.
+  const stripQuotes = (v) =>
+    typeof v === 'string' ? v.replace(/^"+|"+$/g, '').trim() : null;
+  const chModel = stripQuotes(hints.model);
+  const chPlatform = stripQuotes(hints.platform);
+  const chPlatformVersion = stripQuotes(hints.platformVersion);
+
+  if (chModel && chModel !== 'K') {
+    const major = chPlatformVersion ? chPlatformVersion.split('.')[0] : '';
+    if (chPlatform && major) return `${chModel} — ${chPlatform} ${major}`;
+    if (chPlatform) return `${chModel} — ${chPlatform}`;
+    return chModel;
+  }
+
   if (!userAgent || typeof userAgent !== 'string') return null;
 
   let ua;
