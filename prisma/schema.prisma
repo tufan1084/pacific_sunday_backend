@@ -1,0 +1,1177 @@
+// Prisma schema for Pacific Sunday NFC Golf Bag SaaS Platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int          @id @default(autoincrement())
+  email     String       @unique
+  username  String       @unique
+  password  String?
+  googleId  String?      @unique
+  mpin      String?
+  createdAt DateTime     @default(now())
+
+  // Profile Privacy
+  isPrivate Boolean @default(false)
+
+  // Moderation: when true, the user can still log in and read everything but
+  // is denied at the createPost / addComment endpoints. Set + cleared by
+  // superadmins from the admin panel.
+  postingBlocked       Boolean   @default(false)
+  postingBlockedAt     DateTime?
+  postingBlockedReason String?
+
+  profile      UserProfile?
+  bags         Bag[]
+  posts        Post[]
+  postLikes    PostLike[]
+  postComments PostComment[]
+  teamsCreated Team[]        @relation("TeamsCreated")
+  teamMembers  TeamMember[]
+
+  followers            Follow[]             @relation("Following")
+  following            Follow[]             @relation("Follower")
+  followRequestsSent   FollowRequest[]      @relation("FollowRequestSender")
+  followRequestsReceived FollowRequest[]    @relation("FollowRequestReceiver")
+  notifications        Notification[]       @relation("NotificationRecipient")
+  notificationsMade    Notification[]       @relation("NotificationActor")
+  postReports          PostReport[]
+
+  savedPosts          SavedPost[]
+  savedPostCategories SavedPostCategory[]
+  hiddenPosts         HiddenPost[]
+
+  challengesSent     Challenge[]     @relation("ChallengerChallenges")
+  challengesReceived Challenge[]     @relation("OpponentChallenges")
+  challengesWon      Challenge[]     @relation("ChallengeWinner")
+  challengePicks     ChallengePick[]
+
+  conversationParticipants ConversationParticipant[]
+  messagesSent             Message[]
+  messageDeliveries        MessageDelivery[]
+  messageReactions         MessageReaction[]
+
+  nfcLoginTokens         NfcLoginToken[]
+  devices                UserDevice[]
+  deviceVerificationOtps DeviceVerificationOtp[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  id           Int           @id @default(autoincrement())
+  userId       Int           @unique
+  name         String
+  country      String?
+  createdAt    DateTime      @default(now())
+  
+  user         User          @relation(fields: [userId], references: [id])
+  golfPassport GolfPassport?
+
+  @@map("user_profiles")
+}
+
+model GolfPassport {
+  id           Int         @id @default(autoincrement())
+  profileId    Int         @unique
+  fullName     String?
+  nickname     String?
+  handicap     String?
+  bestScore    String?
+  yearsPlaying String?
+  homeCourse   String?
+  golfCountry  String?
+  bio          String?
+  photoUrl     String?
+  updatedAt    DateTime    @updatedAt
+  
+  profile UserProfile @relation(fields: [profileId], references: [id])
+
+  @@map("golf_passports")
+}
+
+// Bag status enum
+enum BagStatus {
+  ACTIVE
+  BANNED
+  LOST
+  DEACTIVATED
+}
+
+// IYK item templates — each row is a bag "type" / product
+model BagType {
+  id              Int      @id @default(autoincrement())
+  iykItemId       String   @unique
+  name            String
+  description     String?
+  imageUrl        String?
+  collection      String?
+  contractAddress String?
+  chainId         Int?
+  totalChips      Int      @default(0)
+  createdAt       DateTime @default(now())
+  syncedAt        DateTime @default(now())
+
+  bags Bag[]
+
+  @@map("bag_types")
+}
+
+// Individual NFC-chipped bags (one row per physical bag / chip)
+model Bag {
+  id           Int        @id @default(autoincrement())
+  uid          String     @unique          // NFC chip UID
+  bagTypeId    Int                         // FK → bag_types
+  tokenId      String?                    // NFT token ID
+  registered   Boolean    @default(false)
+  userId       Int?                        // FK → users (null = unclaimed)
+  status       BagStatus  @default(ACTIVE)
+  registeredAt DateTime?
+  lastTappedAt DateTime?
+  tapCount     Int        @default(0)
+  createdAt    DateTime   @default(now())
+
+  bagType BagType @relation(fields: [bagTypeId], references: [id])
+  user    User?   @relation(fields: [userId], references: [id])
+  scans   Scan[]
+
+  @@map("bags")
+}
+
+model Scan {
+  id          Int      @id @default(autoincrement())
+  bagId       Int                              // FK → bags
+  scanTime    DateTime @default(now())
+  // Raw User-Agent header captured at tap time; null for legacy scans
+  // recorded before this column was added.
+  userAgent   String?
+  // Friendly label derived from userAgent (e.g. "iPhone — iOS 17",
+  // "Samsung SM-S918B", "Chrome on Windows"). Stored so the my-bag history
+  // doesn't re-parse on every render.
+  deviceLabel String?
+
+  bag Bag @relation(fields: [bagId], references: [id])
+
+  @@map("scans")
+}
+
+// ─── Fantasy Golf ───────────────────────────────────────────────────────────
+
+enum TournamentStatus {
+  upcoming
+  live
+  completed
+}
+
+model Tournament {
+  id               Int              @id @default(autoincrement())
+  tournId          String
+  year             Int
+  name             String
+  status           TournamentStatus @default(upcoming)
+  startDate        DateTime?
+  endDate          DateTime?
+  courseName       String?
+  city             String?
+  state            String?
+  country          String?
+  purse            BigInt?
+  fedexPoints      Int?
+  isMajor          Boolean          @default(false)
+  fieldAvailable   Boolean          @default(false)
+  tiersComputedAt  DateTime?
+  lastSyncedAt     DateTime         @default(now())
+  raw              Json?
+  tiers            Json?
+  leaderboard      Json?
+
+  // ─── H2H configuration ────────────────────────────────────────────────────
+  // Set by superadmins from the admin panel. Multiplier scales the held wager
+  // on BOTH sides of every challenge created against this tournament — so a
+  // 70-pt wager on a 2x tournament holds 140 from each player and the winner
+  // receives 140 from the loser. Description is the badge text shown in the
+  // UI ("Major event - 2x payout"). Default 1.0 = no bonus.
+  h2hMultiplier        Float?  @default(1.0)
+  h2hBonusDescription  String?
+
+  players    TournamentPlayer[]
+  picks      UserPick[]
+  challenges Challenge[]
+
+  @@unique([tournId, year])
+  @@index([year, status, startDate])
+  @@map("tournaments")
+}
+
+model Player {
+  id          Int       @id @default(autoincrement())
+  playerId    String    @unique
+  firstName   String
+  lastName    String
+  country     String?
+  isAmateur   Boolean   @default(false)
+  owgrRank    Int?
+  owgrUpdated DateTime?
+  attrs       Json?
+
+  tournaments TournamentPlayer[]
+
+  @@index([owgrRank])
+  @@map("players")
+}
+
+model TournamentPlayer {
+  id            Int     @id @default(autoincrement())
+  tournamentId  Int
+  playerId      Int
+  tier          String
+  tierRank      Int
+  entryOwgr     Int?
+  finalPosition String?
+  earnings      BigInt?
+  fedexPoints   Int?
+  roundScores   Json?
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  player     Player     @relation(fields: [playerId], references: [id])
+
+  @@unique([tournamentId, playerId])
+  @@index([tournamentId, tier])
+  @@map("tournament_players")
+}
+
+model UserPick {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  tournamentId Int
+  picks        Json
+  scoring      Json?
+  submittedAt  DateTime  @default(now())
+  lockedAt     DateTime?
+  pointsAwarded Int?     // Total points earned from this tournament
+  pointsCalculatedAt DateTime?
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tournamentId])
+  @@index([tournamentId])
+  @@map("user_picks")
+}
+
+model PlayerRanking {
+  id         Int      @id @default(autoincrement())
+  playerId   String
+  name       String
+  country    String?
+  rank       Int
+  snapshotAt DateTime @default(now())
+
+  @@unique([playerId, snapshotAt])
+  @@index([snapshotAt, rank])
+  @@map("player_rankings")
+}
+
+// ─── Fantasy Points System ──────────────────────────────────────────────────
+
+model PointsRange {
+  id          Int      @id @default(autoincrement())
+  name        String   // e.g., "Excellent", "Great", "Good"
+  minScore    Int      // e.g., -20 (represents -20 strokes)
+  maxScore    Int      // e.g., -15 (represents -15 strokes)
+  points      Int      // Points awarded for this range
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("points_ranges")
+}
+
+model UserPointsWallet {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  balance   Int      @default(0)
+  // Reserved against open H2H challenges. Spendable balance is
+  // (balance - heldBalance); the wallet UI shows both. Settlement either
+  // releases (decrement heldBalance only) or transfers (loser balance -=
+  // wager, loser heldBalance -= wager, winner balance += wager).
+  heldBalance Int    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions PointsTransaction[]
+
+  @@map("user_points_wallets")
+}
+
+model PointsTransaction {
+  id          Int      @id @default(autoincrement())
+  walletId    Int
+  userId      Int
+  amount      Int      // Positive for credit, negative for debit
+  type        String   // "tournament_reward", "bonus", "deduction"
+  description String?
+  metadata    Json?    // Store tournamentId, picks, etc.
+  createdAt   DateTime @default(now())
+
+  wallet UserPointsWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([walletId])
+  @@map("points_transactions")
+}
+
+// ─── Head-to-Head Challenges ────────────────────────────────────────────────
+// One row per match between two users on a single tournament. Lifecycle:
+//   PENDING   → opponent hasn't responded yet (challenger's wager is on hold)
+//   ACCEPTED  → both wagers held, waiting for the field to be published
+//   LOCKED    → both users have locked their 10-player teams
+//   LIVE      → tournament started (cron flips this when status flips on Tournament)
+//   COMPLETED → settled, winner paid (or null winner = tie)
+//   DECLINED  → opponent declined; challenger's hold released
+//   CANCELLED → challenger cancelled before opponent responded; hold released
+//   REFUNDED  → either side never locked by the deadline; both holds released
+// effectiveWager is snapshotted at creation as wager * tournament.h2hMultiplier
+// so that admin changes after the fact don't retroactively change the stakes.
+
+enum ChallengeStatus {
+  PENDING
+  ACCEPTED
+  LOCKED
+  LIVE
+  COMPLETED
+  DECLINED
+  CANCELLED
+  REFUNDED
+}
+
+model Challenge {
+  id              Int             @id @default(autoincrement())
+  challengerId    Int
+  opponentId      Int
+  tournamentId    Int
+  wager           Int             // Raw points the user typed
+  multiplier      Float           @default(1.0)
+  effectiveWager  Int             // wager * multiplier — what each side actually holds
+  trashTalk       String?
+  status          ChallengeStatus @default(PENDING)
+
+  acceptedAt        DateTime?
+  declinedAt        DateTime?
+  cancelledAt       DateTime?
+  challengerLockedAt DateTime?
+  opponentLockedAt   DateTime?
+
+  // Set during settlement
+  challengerStrokes Int?
+  opponentStrokes   Int?
+  winnerId          Int?      // null = tie/refund
+  settledAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  challenger User       @relation("ChallengerChallenges", fields: [challengerId], references: [id], onDelete: Cascade)
+  opponent   User       @relation("OpponentChallenges",   fields: [opponentId],   references: [id], onDelete: Cascade)
+  winner     User?      @relation("ChallengeWinner",      fields: [winnerId],     references: [id], onDelete: SetNull)
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  picks      ChallengePick[]
+
+  @@index([challengerId, status])
+  @@index([opponentId, status])
+  @@index([tournamentId, status])
+  @@map("challenges")
+}
+
+model ChallengePick {
+  id          Int       @id @default(autoincrement())
+  challengeId Int
+  userId      Int
+  // Array of TournamentPlayer.playerId strings (max 10). Stored as JSON
+  // because lengths/order matter and we never need to query individual picks.
+  playerIds   Json
+  submittedAt DateTime  @default(now())
+  lockedAt    DateTime?
+
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([challengeId, userId])
+  @@index([userId])
+  @@map("challenge_picks")
+}
+
+// ─── Achievement Challenges ────────────────────────────────────────────────
+// Catalog of one-shot achievement-style challenges (e.g. "First Bag Owner").
+// Distinct from the H2H `Challenge` model above. Each row is a global
+// definition; per-user completion is tracked in `UserChallengeCompletion`.
+
+enum ChallengeTrigger {
+  bag_registered
+  profile_completed
+  h2h_won
+  reward_redeemed
+  nfc_tap_5x_month
+  referral
+}
+
+model AchievementChallenge {
+  id          Int              @id @default(autoincrement())
+  triggerType ChallengeTrigger @unique
+  title       String
+  description String
+  points      Int
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  completions UserChallengeCompletion[]
+
+  @@map("achievement_challenges")
+}
+
+model UserChallengeCompletion {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  challengeId Int
+  completedAt DateTime @default(now())
+
+  challenge AchievementChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, challengeId])
+  @@index([userId])
+  @@map("user_challenge_completions")
+}
+
+// One row per referral. `referredUserId` is unique so each new user is
+// counted at most once even if multiple invite codes reach them.
+model Referral {
+  id             Int      @id @default(autoincrement())
+  referrerId     Int
+  referredUserId Int      @unique
+  code           String?
+  createdAt      DateTime @default(now())
+
+  @@index([referrerId])
+  @@map("referrals")
+}
+
+// Platform-wide announcements created by admins. The dashboard banner
+// surfaces the most recent row whose status='Published' and (scheduledAt is
+// null or in the past).
+enum AnnouncementType {
+  Banner
+  Push
+  Both
+}
+
+enum AnnouncementAudience {
+  All
+  Active
+  Premium
+}
+
+enum AnnouncementStatus {
+  Draft
+  Scheduled
+  Published
+}
+
+model Announcement {
+  id          Int                  @id @default(autoincrement())
+  title       String
+  message     String
+  type        AnnouncementType     @default(Both)
+  audience    AnnouncementAudience @default(All)
+  status      AnnouncementStatus   @default(Draft)
+  scheduledAt DateTime?
+  ctaText     String?
+  ctaHref     String?
+  sentTo      Int                  @default(0)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  dismissals DismissedAnnouncement[]
+
+  @@index([status, scheduledAt])
+  @@map("announcements")
+}
+
+model DismissedAnnouncement {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  announcementId Int
+  dismissedAt    DateTime @default(now())
+
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, announcementId])
+  @@index([userId])
+  @@map("dismissed_announcements")
+}
+
+// Tracks a single user's redemption events. Created when reward redemption
+// happens; the achievement trigger fires off the first row insert.
+model RewardRedemption {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  rewardName String
+  pointsCost Int
+  redeemedAt DateTime @default(now())
+
+  @@index([userId, redeemedAt])
+  @@map("reward_redemptions")
+}
+
+// ─── Community Posts ────────────────────────────────────────────────────────
+
+enum PostType {
+  TEXT
+  IMAGE
+  VIDEO
+  MIXED
+}
+
+model Post {
+  id          Int           @id @default(autoincrement())
+  userId      Int
+  teamId      Int?
+  content     String
+  postType    PostType      @default(TEXT)
+  mediaUrls   Json?         // Array of media URLs
+  shareCount  Int           @default(0)
+  isHidden    Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Reshare fields
+  originalPostId Int?        // If this is a reshare, reference to original post
+  reshareComment String?     // Optional comment when resharing
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team        Team?         @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  originalPost Post?        @relation("PostReshares", fields: [originalPostId], references: [id], onDelete: Cascade)
+  reshares    Post[]        @relation("PostReshares")
+  likes       PostLike[]
+  comments    PostComment[]
+  pins        UserPostPin[]
+  reports     PostReport[]
+  tags        PostTag[]
+  savedBy     SavedPost[]
+  hiddenBy    HiddenPost[]
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([teamId])
+  @@index([originalPostId])
+  @@map("posts")
+}
+
+// ─── Post Tagging (hybrid keyword-based) ────────────────────────────────────
+// Tags are admin-curated categories (e.g. "fantasy_talk", "bag_flex").
+// TagKeyword rows drive auto-tagging on post create; admins can override
+// per-post via PostTag.source = "manual".
+
+model Tag {
+  id          Int      @id @default(autoincrement())
+  slug        String   @unique
+  label       String
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  keywords TagKeyword[]
+  posts    PostTag[]
+
+  @@map("tags")
+}
+
+model TagKeyword {
+  id        Int      @id @default(autoincrement())
+  tagId     Int
+  keyword   String
+  createdAt DateTime @default(now())
+
+  tag Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([tagId, keyword])
+  @@index([tagId])
+  @@index([keyword])
+  @@map("tag_keywords")
+}
+
+model PostTag {
+  id        Int      @id @default(autoincrement())
+  postId    Int
+  tagId     Int
+  source    String   @default("auto") // "auto" | "manual"
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, tagId])
+  @@index([postId])
+  @@index([tagId])
+  @@map("post_tags")
+}
+
+enum PostReportStatus {
+  pending
+  reviewed
+  dismissed
+}
+
+model PostReport {
+  id        Int              @id @default(autoincrement())
+  postId    Int
+  userId    Int
+  reason    String
+  details   String?
+  status    PostReportStatus @default(pending)
+  createdAt DateTime         @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([status])
+  @@map("post_reports")
+}
+
+model PostLike {
+  id        Int      @id @default(autoincrement())
+  postId    Int
+  userId    Int
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@map("post_likes")
+}
+
+model PostComment {
+  id        Int      @id @default(autoincrement())
+  postId    Int
+  userId    Int
+  parentId  Int?     // For nested comments (replies)
+  content   String
+  mediaUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  post   Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent PostComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies PostComment[] @relation("CommentReplies")
+
+  @@index([postId])
+  @@index([userId])
+  @@index([parentId])
+  @@map("post_comments")
+}
+
+model UserPostPin {
+  id        Int      @id @default(autoincrement())
+  postId    Int
+  userId    Int
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId])
+  @@map("user_post_pins")
+}
+
+// ─── Teams ──────────────────────────────────────────────────────────────────
+
+enum TeamPrivacy {
+  public
+  private
+}
+
+enum TeamRole {
+  admin
+  member
+}
+
+enum JoinRequestStatus {
+  pending
+  approved
+  rejected
+}
+
+enum InviteStatus {
+  pending
+  accepted
+  declined
+}
+
+model Team {
+  id          Int         @id @default(autoincrement())
+  name        String      @unique
+  description String?
+  imageUrl    String?
+  privacy     TeamPrivacy @default(public)
+  creatorId   Int
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt @default(now())
+
+  creator      User              @relation("TeamsCreated", fields: [creatorId], references: [id])
+  members      TeamMember[]
+  posts        Post[]
+  joinRequests TeamJoinRequest[]
+  invites      TeamInvite[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id       Int      @id @default(autoincrement())
+  teamId   Int
+  userId   Int
+  role     TeamRole @default(member)
+  joinedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([userId])
+  @@map("team_members")
+}
+
+model TeamJoinRequest {
+  id        Int               @id @default(autoincrement())
+  teamId    Int
+  userId    Int
+  status    JoinRequestStatus @default(pending)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([teamId, status])
+  @@index([userId])
+  @@map("team_join_requests")
+}
+
+model TeamInvite {
+  id        Int          @id @default(autoincrement())
+  teamId    Int
+  userId    Int
+  invitedBy Int
+  status    InviteStatus @default(pending)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([userId, status])
+  @@map("team_invites")
+}
+
+// ─── SMTP Configuration (singleton) ─────────────────────────────────────────
+model SmtpConfig {
+  id              Int      @id @default(autoincrement())
+  host            String
+  port            Int      @default(587)
+  secure          Boolean  @default(false)
+  username        String
+  password        String
+  fromEmail       String
+  fromName        String?
+  superadminEmail String?  // Email to receive admin notifications (reports, etc.)
+  enabled         Boolean  @default(true)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  @@map("smtp_config")
+}
+
+// ─── Admin Users (separate from regular users) ─────────────────────────────
+model Admin {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  username  String   @unique
+  password  String
+  role      String   @default("admin") // "admin" | "superadmin"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admins")
+}
+
+// ─── Golf API Settings (singleton) ──────────────────────────────────────────
+model GolfSettings {
+  id                        Int      @id @default(autoincrement())
+  leaderboardSyncInterval   Int      @default(15)  // Minutes between live leaderboard syncs
+  enabled                   Boolean  @default(true)
+  updatedAt                 DateTime @updatedAt
+  createdAt                 DateTime @default(now())
+
+  @@map("golf_settings")
+}
+
+// ─── Follow ─────────────────────────────────────────────────────────────────
+
+model Follow {
+  id          Int      @id @default(autoincrement())
+  followerId  Int
+  followingId Int
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followingId])
+  @@map("follows")
+}
+
+enum FollowRequestStatus {
+  pending
+  accepted
+  rejected
+}
+
+model FollowRequest {
+  id         Int                 @id @default(autoincrement())
+  senderId   Int
+  receiverId Int
+  status     FollowRequestStatus @default(pending)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  sender   User @relation("FollowRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("FollowRequestReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([receiverId, status])
+  @@index([senderId])
+  @@map("follow_requests")
+}
+
+// ─── Notifications ──────────────────────────────────────────────────────────
+
+enum NotificationType {
+  POST_LIKED
+  POST_COMMENTED
+  COMMENT_REPLIED
+  USER_FOLLOWED
+  FOLLOW_REQUEST_RECEIVED
+  FOLLOW_REQUEST_ACCEPTED
+  TEAM_INVITED
+  TEAM_JOIN_REQUEST
+  TEAM_JOIN_APPROVED
+  TEAM_JOIN_REJECTED
+  TEAM_ROLE_CHANGED
+  TEAM_REMOVED
+  TEAM_POST_CREATED
+  POST_RESHARED
+  H2H_CHALLENGE_RECEIVED
+  H2H_CHALLENGE_ACCEPTED
+  H2H_CHALLENGE_DECLINED
+  H2H_CHALLENGE_CANCELLED
+  H2H_CHALLENGE_OPPONENT_LOCKED
+  H2H_CHALLENGE_FIELD_AVAILABLE
+  H2H_CHALLENGE_RESULT
+  CHALLENGE_UNLOCKED
+  FANTASY_TOURNAMENT_LIVE
+}
+
+model Notification {
+  id         Int              @id @default(autoincrement())
+  userId     Int              // recipient
+  type       NotificationType
+  actorId    Int?             // who triggered it
+  entityType String?          // 'post' | 'comment' | 'team' | 'user'
+  entityId   Int?
+  teamId     Int?
+  data       Json?
+  read       Boolean          @default(false)
+  createdAt  DateTime         @default(now())
+
+  user  User  @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+// ─── Password Reset OTPs ────────────────────────────────────────────────────
+model PasswordResetOtp {
+  id        Int      @id @default(autoincrement())
+  email     String
+  otpHash   String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([email, used])
+  @@map("password_reset_otps")
+}
+
+// ─── NFC Login Tokens ───────────────────────────────────────────────────────
+// Short-lived tokens issued when a registered NFC bag is tapped. The /n page
+// shows a login form whose POST /auth/login (and forgot/reset endpoints) only
+// accept a token that exists here, isn't used, hasn't expired, and matches the
+// user being logged in. Without this, anyone could hit /login directly.
+model NfcLoginToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int
+  bagUid    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token, usedAt])
+  @@index([userId])
+  @@map("nfc_login_tokens")
+}
+
+// ─── Trusted Devices ────────────────────────────────────────────────────────
+// One row per (user, device fingerprint). Logins from unknown devices require
+// an email OTP confirmation before the device is trusted and a JWT is issued.
+model UserDevice {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  fingerprintHash String
+  label           String?  // Friendly display, e.g. "Chrome on Windows"
+  userAgent       String?
+  ipAddress       String?
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  revokedAt       DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fingerprintHash])
+  @@index([userId])
+  @@map("user_devices")
+}
+
+// ─── Device Verification OTPs ───────────────────────────────────────────────
+// Issued when a user logs in from an unrecognised device. Holds the PIN check
+// result + fingerprint + nfcToken in escrow; on verification we create the
+// UserDevice row and issue the JWT.
+model DeviceVerificationOtp {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  fingerprintHash String
+  userAgent       String?
+  ipAddress       String?
+  otpHash         String
+  nfcTokenId      Int?     // The NfcLoginToken that started this login
+  expiresAt       DateTime
+  used            Boolean  @default(false)
+  attempts        Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, used])
+  @@map("device_verification_otps")
+}
+
+// ─── Email Verification OTPs ────────────────────────────────────────────────
+model EmailVerificationOtp {
+  id        Int      @id @default(autoincrement())
+  email     String
+  otpHash   String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([email, used])
+  @@map("email_verification_otps")
+}
+
+// ─── Saved Posts ─────────────────────────────────────────────────────────────
+// Per-user bookmark folders. Saving a post creates a SavedPost row with an
+// optional category — moving between categories updates the row instead of
+// duplicating, so a post is bookmarked at most once per user.
+model SavedPostCategory {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedPosts SavedPost[]
+
+  @@unique([userId, name])
+  @@index([userId, sortOrder])
+  @@map("saved_post_categories")
+}
+
+model SavedPost {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  postId     Int
+  categoryId Int?     // null = saved but uncategorized
+  createdAt  DateTime @default(now())
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post     Post              @relation(fields: [postId], references: [id], onDelete: Cascade)
+  category SavedPostCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, postId])
+  @@index([userId, categoryId])
+  @@index([postId])
+  @@map("saved_posts")
+}
+
+// Per-user "I don't want to see this post again" hide. Personal preference
+// only — does not remove the post for anyone else and never reaches the post
+// author. Filtered out of GET /posts and the saved tab for this user.
+model HiddenPost {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  postId    Int
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId])
+  @@map("hidden_posts")
+}
+
+// ─── Chat / Messaging System ────────────────────────────────────────────────
+
+enum ConversationType {
+  DIRECT    // One-on-one chat
+  GROUP     // Group chat (future)
+}
+
+model Conversation {
+  id          Int              @id @default(autoincrement())
+  type        ConversationType @default(DIRECT)
+  name        String?          // For group chats
+  imageUrl    String?          // For group chats
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id              Int      @id @default(autoincrement())
+  conversationId  Int
+  userId          Int
+  unreadCount     Int      @default(0)
+  lastReadAt      DateTime?
+  joinedAt        DateTime @default(now())
+  isTyping        Boolean  @default(false)
+  lastTypingAt    DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+  @@map("conversation_participants")
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  FILE
+  MIXED
+}
+
+model Message {
+  id              Int         @id @default(autoincrement())
+  conversationId  Int
+  senderId        Int
+  content         String      @db.Text
+  messageType     MessageType @default(TEXT)
+  mediaUrls       Json?       // Array of media URLs
+  metadata        Json?       // File info, dimensions, etc.
+  replyToId       Int?        // Reply to another message
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?   // Soft delete
+  editedAt        DateTime?
+
+  conversation Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User               @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo      Message?           @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies      Message[]          @relation("MessageReplies")
+  deliveries   MessageDelivery[]
+  reactions    MessageReaction[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@index([replyToId])
+  @@map("messages")
+}
+
+enum DeliveryStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
+model MessageDelivery {
+  id        Int            @id @default(autoincrement())
+  messageId Int
+  userId    Int
+  status    DeliveryStatus @default(SENT)
+  timestamp DateTime       @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+  @@map("message_deliveries")
+}
+
+model MessageReaction {
+  id        Int      @id @default(autoincrement())
+  messageId Int
+  userId    Int
+  emoji     String   // "❤️", "👍", "😂", etc.
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+  @@map("message_reactions")
+}
