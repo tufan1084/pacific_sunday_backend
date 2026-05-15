@@ -246,19 +246,26 @@ router.post(
 
 /**
  * POST /auth/reset-password
- * Body: { resetToken, newPassword }
- * Sets a new password using the reset token from verify-otp.
+ * Body: { resetToken, newPin } (newMpin/newPassword/mpin/pin accepted as aliases)
+ * Sets a new 4-digit PIN using the reset token from verify-otp. Users log in
+ * with a PIN, not a password — strict 4-digit validation is done in the
+ * controller so any of the accepted field names works.
  */
 router.post(
   '/reset-password',
   authLimiter,
   [
     body('resetToken').notEmpty().withMessage('Reset token is required'),
-    body('newPassword')
-      .notEmpty().withMessage('New password is required')
-      .isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
-      .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
-      .matches(/[0-9]/).withMessage('Password must contain at least one number'),
+    body().custom((value) => {
+      const v = value?.newPin ?? value?.newMpin ?? value?.newPassword ?? value?.mpin ?? value?.pin;
+      if (v === undefined || v === null || String(v).trim() === '') {
+        throw new Error('New PIN is required');
+      }
+      if (!/^\d{4}$/.test(String(v).trim())) {
+        throw new Error('PIN must be exactly 4 digits');
+      }
+      return true;
+    }),
   ],
   validate,
   resetPassword

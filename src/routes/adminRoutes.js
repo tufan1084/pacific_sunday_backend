@@ -9,6 +9,7 @@ const golfSettingsController = require('../controllers/golfSettingsController');
 const challengeController = require('../controllers/challengeController');
 const announcementController = require('../controllers/announcementController');
 const auditLogController = require('../controllers/auditLogController');
+const platformSettingsController = require('../controllers/platformSettingsController');
 const { authenticateAdmin, requireSuperAdmin } = require('../middleware/adminAuthMiddleware');
 const { autoLogAdminMutations } = require('../middleware/auditMiddleware');
 
@@ -92,6 +93,14 @@ router.get('/announcements', announcementController.adminListAnnouncements);
 router.post('/announcements', announcementController.adminCreateAnnouncement);
 router.put('/announcements/:id', announcementController.adminUpdateAnnouncement);
 router.delete('/announcements/:id', announcementController.adminDeleteAnnouncement);
+
+// ─── Platform Settings ─────────────────────────────────────────────────────
+// Read for any admin; writes + danger actions are superadmin-only.
+router.get('/platform-settings', platformSettingsController.getSettings);
+router.put('/platform-settings', requireSuperAdmin, platformSettingsController.updateSettings);
+router.get('/danger/inactive-count', requireSuperAdmin, platformSettingsController.previewInactiveUsers);
+router.post('/danger/reset-points', requireSuperAdmin, platformSettingsController.resetAllPoints);
+router.post('/danger/purge-inactive', requireSuperAdmin, platformSettingsController.purgeInactiveUsers);
 
 // ─── Audit Logs ────────────────────────────────────────────────────────────
 // Read-only for any admin; settings + manual purge restricted to superadmin

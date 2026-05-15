@@ -871,6 +871,22 @@ model AuditSettings {
   @@map("audit_settings")
 }
 
+// Singleton row for platform-wide settings configured from the admin
+// Settings page. maintenanceMode, when true, makes the maintenance middleware
+// reject all non-admin API traffic with 503. maxH2HWager is enforced in
+// h2hController.createChallenge — challenges above it are rejected.
+model PlatformSettings {
+  id              Int      @id @default(autoincrement())
+  appName         String   @default("Pacific Sunday")
+  appDescription  String   @default("Fantasy golf platform with NFC-enabled bag collectibles")
+  maintenanceMode Boolean  @default(false)
+  maxH2HWager     Int      @default(150)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  @@map("platform_settings")
+}
+
 // ─── Golf API Settings (singleton) ──────────────────────────────────────────
 model GolfSettings {
   id                        Int      @id @default(autoincrement())

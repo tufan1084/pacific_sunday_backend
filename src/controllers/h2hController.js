@@ -4,6 +4,7 @@ const points = require('../services/pointsService');
 const h2h = require('../services/h2hService');
 const { createNotification } = require('../services/notificationService');
 const { emitH2HTeamsLocked } = require('../config/socket');
+const { getPlatformSettings } = require('../services/platformSettingsService');
 
 const TEAM_SIZE = h2h.TEAM_SIZE;
 
@@ -121,6 +122,15 @@ exports.createChallenge = async (req, res) => {
     const wagerInt = parseInt(wager, 10);
     if (!Number.isInteger(wagerInt) || wagerInt < 1) {
       return res.status(400).json({ success: false, message: 'Wager must be a positive integer' });
+    }
+
+    // Enforce the admin-configured per-challenge wager cap.
+    const { maxH2HWager } = await getPlatformSettings();
+    if (maxH2HWager && wagerInt > maxH2HWager) {
+      return res.status(400).json({
+        success: false,
+        message: `Wager exceeds the maximum allowed (${maxH2HWager} points)`,
+      });
     }
 
     const [opponent, tournament] = await Promise.all([

@@ -219,9 +219,11 @@ const USER_ROUTE_RULES = [
   // Devices
   { re: /^\/api\/auth\/devices\/(\d+)$/,                   method: 'DELETE', action: 'DEVICE_REVOKE',          category: 'AUTH',    entityType: 'UserDevice', idGroup: 1 },
   { re: /^\/api\/auth\/verify-device-otp$/,                method: 'POST',   action: 'DEVICE_OTP_VERIFY',      category: 'AUTH' },
-  { re: /^\/api\/auth\/forgot-pin$/,                       method: 'POST',   action: 'PIN_RESET_REQUEST',      category: 'AUTH' },
-  { re: /^\/api\/auth\/reset-pin$/,                        method: 'POST',   action: 'PIN_RESET_CONFIRM',      category: 'AUTH' },
-  { re: /^\/api\/auth\/verify-email$/,                     method: 'POST',   action: 'EMAIL_VERIFY',           category: 'AUTH' },
+  { re: /^\/api\/auth\/forgot-password$/,                  method: 'POST',   action: 'PIN_RESET_REQUEST',      category: 'AUTH' },
+  { re: /^\/api\/auth\/verify-otp$/,                       method: 'POST',   action: 'PIN_RESET_OTP_VERIFY',   category: 'AUTH' },
+  { re: /^\/api\/auth\/reset-password$/,                   method: 'POST',   action: 'PIN_RESET_CONFIRM',      category: 'AUTH' },
+  { re: /^\/api\/auth\/verify-email-otp$/,                 method: 'POST',   action: 'EMAIL_VERIFY',           category: 'AUTH' },
+  { re: /^\/api\/auth\/send-verification-otp$/,            method: 'POST',   action: 'EMAIL_VERIFY_REQUEST',   category: 'AUTH' },
 
   // Announcements (user-side: dismiss)
   { re: /^\/api\/announcements\/(\d+)\/dismiss$/,          method: 'POST',   action: 'ANNOUNCEMENT_DISMISS',   category: 'ANNOUNCEMENT', entityType: 'Announcement', idGroup: 1 },

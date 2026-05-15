@@ -6,6 +6,7 @@ const path = require('path');
 const router = require('./routes/index');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 const { attachAuditLogger } = require('./middleware/auditMiddleware');
+const { maintenanceGuard } = require('./middleware/maintenanceMiddleware');
 const logger = require('./config/logger');
 const { connectRedis } = require('./config/redis');
 
@@ -80,6 +81,11 @@ app.use((req, res, next) => {
 // structured audit row in one line. The middleware itself doesn't write
 // anything — controllers decide what to log.
 app.use(attachAuditLogger);
+
+// ─── Maintenance Mode ────────────────────────────────────────────────────────
+// When enabled in PlatformSettings, blocks all non-admin API traffic with 503.
+// Mounted before the router so req.path is the full "/api/..." path.
+app.use(maintenanceGuard);
 
 // ─── API Routes ──────────────────────────────────────────────────────────────
 app.use('/api', router);

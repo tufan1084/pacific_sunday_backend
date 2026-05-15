@@ -4,7 +4,7 @@ const { prisma } = require('../config/db');
 const logger = require('../config/logger');
 const emailService = require('../services/emailService');
 const nfcTokenService = require('../services/nfcTokenService');
-const { hashPassword, findUserByEmail, findUserByEmailOrUsername } = require('../services/authService');
+const { hashMpin, findUserByEmail, findUserByEmailOrUsername } = require('../services/authService');
 
 const OTP_EXPIRY_MINUTES = 10;
 const MAX_OTP_ATTEMPTS = 5;
@@ -140,7 +140,7 @@ exports.verifyOtp = async (req, res, next) => {
     return res.json({
       success: true,
       data: { resetToken },
-      message: 'Code verified. You may now set a new password.',
+      message: 'Code verified. You may now set a new PIN.',
     });
   } catch (error) {
     logger.error(`verifyOtp error: ${error.message}`);
@@ -149,16 +149,26 @@ exports.verifyOtp = async (req, res, next) => {
 };
 
 // POST /api/auth/reset-password
-// Body: { resetToken, newPassword }
+// Body: { resetToken, newPin } — `newMpin`/`newPassword`/`mpin`/`pin` are also
+// accepted as aliases so we don't break whatever the current frontend sends.
+//
+// IMPORTANT: users authenticate with a 4-digit PIN (user.mpin column), NOT a
+// password — login only ever checks verifyMpin(pin, user.mpin). The old code
+// here reset user.password, which login never reads, so the whole "forgot"
+// flow silently did nothing. This resets the PIN, which is what actually
+// gates login.
 exports.resetPassword = async (req, res, next) => {
   try {
-    const { resetToken, newPassword } = req.body;
-    if (!resetToken || !newPassword) {
-      return res.status(400).json({ success: false, message: 'Reset token and new password are required.' });
+    const { resetToken } = req.body;
+    const newPin = req.body.newPin ?? req.body.newMpin ?? req.body.newPassword ?? req.body.mpin ?? req.body.pin;
+
+    if (!resetToken || newPin === undefined || newPin === null || newPin === '') {
+      return res.status(400).json({ success: false, message: 'Reset token and new PIN are required.' });
     }
 
-    if (String(newPassword).length < 8) {
-      return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+    const pinStr = String(newPin).trim();
+    if (!/^\d{4}$/.test(pinStr)) {
+      return res.status(400).json({ success: false, message: 'PIN must be exactly 4 digits.' });
     }
 
     const secret = process.env.JWT_SECRET;
@@ -180,11 +190,21 @@ exports.resetPassword = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    const hashed = await hashPassword(newPassword);
-    await prisma.user.update({ where: { id: user.id }, data: { password: hashed } });
+    const hashed = await hashMpin(pinStr);
+    await prisma.user.update({ where: { id: user.id }, data: { mpin: hashed } });
 
-    logger.info(`Password reset successful for userId=${user.id}`);
-    return res.json({ success: true, message: 'Password has been reset. You can now sign in.' });
+    req.audit?.({
+      actorId: user.id,
+      actorType: 'USER',
+      actorName: user.username || user.email,
+      action: 'PIN_RESET_CONFIRM',
+      category: 'AUTH',
+      entityType: 'User',
+      entityId: user.id,
+    });
+
+    logger.info(`PIN reset successful for userId=${user.id}`);
+    return res.json({ success: true, message: 'Your PIN has been reset. You can now sign in.' });
   } catch (error) {
     logger.error(`resetPassword error: ${error.message}`);
     next(error);
