@@ -67,6 +67,12 @@ const allowedOrigins = [
 ];
 
 const initializeSocket = (server) => {
+  // Boot = zero sockets connected. Drop any presence state left in Redis by a
+  // previous process so users don't show "online" against dead socket ids.
+  presence.clearAllPresence().catch((err) =>
+    logger.error(`[presence] boot clear failed: ${err.message}`)
+  );
+
   io = new Server(server, {
     cors: {
       origin: (origin, callback) => {

@@ -371,35 +371,23 @@ exports.sendMessage = async (req, res) => {
       return res.status(400).json({ error: 'Message content is required' });
     }
 
-    // Verify user is participant
-    const participant = await prisma.conversationParticipant.findUnique({
-      where: {
-        conversationId_userId: {
-          conversationId: parseInt(conversationId),
-          userId
-        }
-      }
-    });
+    const cid = parseInt(conversationId);
 
-    if (!participant) {
+    // One round-trip for the membership gate + recipient list (was two
+    // sequential queries), and resolve the reply target in parallel since
+    // it's independent. Trimming these serial awaits is the main latency win.
+    const [participants, safeReplyToId] = await Promise.all([
+      prisma.conversationParticipant.findMany({
+        where: { conversationId: cid },
+        select: { userId: true },
+      }),
+      resolveReplyTo(replyToId, cid),
+    ]);
+
+    if (!participants.some((p) => p.userId === userId)) {
       return res.status(403).json({ error: 'Not a participant in this conversation' });
     }
-
-    // Get other participants
-    const otherParticipants = await prisma.conversationParticipant.findMany({
-      where: {
-        conversationId: parseInt(conversationId),
-        userId: { not: userId }
-      }
-    });
-
-    // Resolve the reply target safely. A bad replyToId (optimistic/negative
-    // temp id from the client, a deleted message, or one from another
-    // conversation) used to make prisma.message.create throw a foreign-key
-    // error → the whole send 500'd and the recipient got nothing. Now we
-    // validate it and just drop the link if it's invalid, so the message
-    // still goes through.
-    const safeReplyToId = await resolveReplyTo(replyToId, parseInt(conversationId));
+    const otherParticipants = participants.filter((p) => p.userId !== userId);
 
     // Create message
     const message = await prisma.message.create({
@@ -448,45 +436,37 @@ exports.sendMessage = async (req, res) => {
       }
     });
 
-    // Update conversation timestamp
-    await prisma.conversation.update({
-      where: { id: parseInt(conversationId) },
-      data: { updatedAt: new Date() }
-    });
-
-    // Increment unread count for other participants
-    await prisma.conversationParticipant.updateMany({
-      where: {
-        conversationId: parseInt(conversationId),
-        userId: { not: userId }
-      },
-      data: {
-        unreadCount: { increment: 1 }
-      }
-    });
-
-    // Real-time delivery: emit to each participant's personal user room so they
-    // receive the message even if the chat panel isn't open. The conversation
-    // room emit stays for anyone actively viewing the thread (kept for parity).
+    // Deliver to recipients RIGHT NOW — before any of the bookkeeping below.
+    // Delivery latency is what the user feels; the conversation timestamp,
+    // unread counters and cache busting don't need to be on that path.
     const io = req.app.get('io');
-    const recipientPresence = await presence.getPresenceBulk(otherParticipants.map((p) => p.userId));
     if (io) {
-      io.to(`conversation_${conversationId}`).emit('new_message', message);
+      io.to(`conversation_${cid}`).emit('new_message', message);
       for (const p of otherParticipants) {
         io.to(`user:${p.userId}`).emit('new_message', message);
       }
-      // Sender also needs the canonical message back via socket so other devices stay in sync.
+      // Sender's other devices stay in sync.
       io.to(`user:${userId}`).emit('new_message', message);
     }
 
-    // Cache invalidation: the conversation list preview + unread badge changed
-    // for every participant, so bust their caches now.
-    invalidateForConversation(conversationId);
+    // Respond to the sender immediately too — the optimistic bubble swaps to
+    // the canonical message as soon as this returns.
+    res.json(message);
 
-    res.json({ ...message, recipientPresence });
+    // Bookkeeping is fire-and-forget. It must run AFTER the writes so the
+    // rebuilt cache reflects them, but nothing waits on it.
+    Promise.all([
+      prisma.conversation.update({ where: { id: cid }, data: { updatedAt: new Date() } }),
+      prisma.conversationParticipant.updateMany({
+        where: { conversationId: cid, userId: { not: userId } },
+        data: { unreadCount: { increment: 1 } },
+      }),
+    ])
+      .then(() => invalidateForConversation(cid))
+      .catch((err) => logger.error(`[chat] post-send bookkeeping failed: ${err.message}`));
   } catch (error) {
     logger.error('Error sending message:', error);
-    res.status(500).json({ error: 'Failed to send message' });
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to send message' });
   }
 };
 
@@ -502,31 +482,25 @@ exports.sendMediaMessage = async (req, res) => {
       return res.status(400).json({ error: 'No media files uploaded' });
     }
 
-    // Verify user is participant
-    const participant = await prisma.conversationParticipant.findUnique({
-      where: {
-        conversationId_userId: {
-          conversationId: parseInt(conversationId),
-          userId
-        }
-      }
-    });
-
-    if (!participant) {
-      return res.status(403).json({ error: 'Not a participant in this conversation' });
-    }
+    const cid = parseInt(conversationId);
 
     // Get media URLs
     const mediaUrls = files.map(file => file.location || `/uploads/chat/${file.filename}`);
     const messageType = files[0].mimetype.startsWith('image/') ? 'IMAGE' : 'VIDEO';
 
-    // Get other participants
-    const otherParticipants = await prisma.conversationParticipant.findMany({
-      where: {
-        conversationId: parseInt(conversationId),
-        userId: { not: userId }
-      }
-    });
+    // Membership gate + recipient list in one query, reply target in parallel.
+    const [participants, safeReplyToId] = await Promise.all([
+      prisma.conversationParticipant.findMany({
+        where: { conversationId: cid },
+        select: { userId: true },
+      }),
+      resolveReplyTo(replyToId, cid),
+    ]);
+
+    if (!participants.some((p) => p.userId === userId)) {
+      return res.status(403).json({ error: 'Not a participant in this conversation' });
+    }
+    const otherParticipants = participants.filter((p) => p.userId !== userId);
 
     // Create message
     const message = await prisma.message.create({
@@ -536,7 +510,7 @@ exports.sendMediaMessage = async (req, res) => {
         content: content || '',
         messageType: files.length > 1 ? 'MIXED' : messageType,
         mediaUrls,
-        replyToId: replyToId ? parseInt(replyToId) : null,
+        replyToId: safeReplyToId,
         deliveries: {
           create: otherParticipants.map(p => ({
             userId: p.userId,
@@ -558,40 +532,49 @@ exports.sendMediaMessage = async (req, res) => {
           }
         },
         deliveries: true,
-        reactions: true
+        reactions: true,
+        replyTo: {
+          select: {
+            id: true,
+            content: true,
+            messageType: true,
+            sender: {
+              select: {
+                id: true,
+                username: true,
+                profile: { select: { name: true } },
+              },
+            }
+          }
+        }
       }
     });
 
-    // Update conversation
-    await prisma.conversation.update({
-      where: { id: parseInt(conversationId) },
-      data: { updatedAt: new Date() }
-    });
-
-    // Increment unread count
-    await prisma.conversationParticipant.updateMany({
-      where: {
-        conversationId: parseInt(conversationId),
-        userId: { not: userId }
-      },
-      data: { unreadCount: { increment: 1 } }
-    });
-
+    // Deliver immediately, then respond, then do the bookkeeping off the
+    // critical path — same pattern as the text send.
     const io = req.app.get('io');
     if (io) {
-      io.to(`conversation_${conversationId}`).emit('new_message', message);
+      io.to(`conversation_${cid}`).emit('new_message', message);
       for (const p of otherParticipants) {
         io.to(`user:${p.userId}`).emit('new_message', message);
       }
       io.to(`user:${userId}`).emit('new_message', message);
     }
 
-    invalidateForConversation(conversationId);
-
     res.json(message);
+
+    Promise.all([
+      prisma.conversation.update({ where: { id: cid }, data: { updatedAt: new Date() } }),
+      prisma.conversationParticipant.updateMany({
+        where: { conversationId: cid, userId: { not: userId } },
+        data: { unreadCount: { increment: 1 } },
+      }),
+    ])
+      .then(() => invalidateForConversation(cid))
+      .catch((err) => logger.error(`[chat] post-media-send bookkeeping failed: ${err.message}`));
   } catch (error) {
     logger.error('Error sending media message:', error);
-    res.status(500).json({ error: 'Failed to send media message' });
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to send media message' });
   }
 };
 

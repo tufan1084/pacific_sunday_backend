@@ -120,9 +120,10 @@ const AUTO_LOG_SKIP_RULES = [
   // Audit log endpoints would otherwise log themselves on every page load.
   { method: '*',    pathRegex: /^\/api\/admin\/audit-(logs|settings)/ },
 
-  // Chat noise: typing pings, message read receipts, delivery acks.
-  { method: '*',    pathRegex: /^\/api\/chat\/.*\/typing/ },
-  { method: '*',    pathRegex: /^\/api\/chat\/.*\/read/ },
+  // Chat / messaging is never audited — private DM content must not land in
+  // an admin-readable table. This blanket rule covers send / media / react /
+  // edit / delete / typing / read for every conversation.
+  { method: '*',    pathRegex: /^\/api\/chat\// },
 
   // Notification mark-as-read fires constantly as the user scrolls.
   { method: 'PATCH', pathRegex: /^\/api\/notifications\/.*\/read/ },
@@ -228,6 +229,10 @@ const USER_ROUTE_RULES = [
   // Bag tap / registration (user side)
   { re: /^\/api\/bag\/register$/,                          method: 'POST',   action: 'BAG_REGISTER',           category: 'BAG',     entityType: 'Bag' },
   { re: /^\/api\/bag\/(.+)\/tap$/,                         method: 'POST',   action: 'BAG_TAP',                category: 'BAG',     entityType: 'Bag',       idGroup: 1 },
+
+  // NOTE: chat/messaging endpoints are intentionally NOT logged — see the
+  // blanket /api/chat skip in AUTO_LOG_SKIP_RULES. Logging DMs would put
+  // private message content into an admin-readable audit table.
 ];
 
 // Heuristic fallback when no specific rule matched.
@@ -245,7 +250,7 @@ const inferGenericCategory = (path) => {
   if (path.startsWith('/api/points')) return 'POINTS';
   if (path.startsWith('/api/tags')) return 'TAG';
   if (path.startsWith('/api/announcements')) return 'ANNOUNCEMENT';
-  if (path.startsWith('/api/chat')) return 'USER';
+  if (path.startsWith('/api/chat')) return 'CHAT';
   if (path.startsWith('/api/notifications')) return 'USER';
   return 'SYSTEM';
 };

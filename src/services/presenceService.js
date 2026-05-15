@@ -15,7 +15,36 @@ const memoryLastSeen = new Map(); // userId -> ISO string
 const socketsKey = (userId) => `presence:sockets:${userId}`;
 const lastSeenKey = (userId) => `presence:lastseen:${userId}`;
 
+// Safety TTL on the per-user socket set. Every add refreshes it. If a
+// disconnect event is ever missed (network drop, crashed tab) the set still
+// self-heals after this window instead of pinning the user "online" forever.
+const SOCKET_SET_TTL_SEC = 2 * 60 * 60; // 2h
+
 const useRedis = () => isRedisAvailable() && getRedisClient();
+
+// Wipe ALL presence state. Called once on server boot: at that moment zero
+// sockets are connected, so any `presence:sockets:*` keys left in Redis from
+// a previous process are stale and would make everyone show as "online"
+// until those phantom socket ids happened to be cleaned up (they never are).
+async function clearAllPresence() {
+  memorySockets.clear();
+  memoryLastSeen.clear();
+  if (useRedis()) {
+    try {
+      const client = getRedisClient();
+      // SCAN rather than KEYS so we don't block Redis on large keyspaces.
+      let cursor = '0';
+      do {
+        const [next, keys] = await client.scan(cursor, 'MATCH', 'presence:sockets:*', 'COUNT', 200);
+        cursor = next;
+        if (keys.length) await client.del(...keys);
+      } while (cursor !== '0');
+      logger.info('[presence] cleared stale socket sets on boot');
+    } catch (err) {
+      logger.error(`[presence] clearAllPresence redis error: ${err.message}`);
+    }
+  }
+}
 
 // Add a socket for a user. Returns { wentOnline: boolean } so the caller can
 // decide whether to broadcast a transition event.
@@ -26,6 +55,9 @@ async function addSocket(userId, socketId) {
       const client = getRedisClient();
       const before = await client.scard(socketsKey(uid));
       await client.sadd(socketsKey(uid), socketId);
+      // Refresh the safety TTL on every add so an active user's set never
+      // expires under them, but an abandoned set eventually does.
+      await client.expire(socketsKey(uid), SOCKET_SET_TTL_SEC);
       await client.del(lastSeenKey(uid));
       return { wentOnline: before === 0 };
     } catch (err) {
@@ -132,6 +164,7 @@ async function getPresenceBulk(userIds) {
 }
 
 module.exports = {
+  clearAllPresence,
   addSocket,
   removeSocket,
   isUserOnline,
