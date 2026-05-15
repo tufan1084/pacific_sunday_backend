@@ -8736,7 +8736,7 @@
       ],
       "timestamp": "2026-01-16T15:54:44.975000"
     },
-    "expiresAt": 1778761949241
+    "expiresAt": 1778765832172
   },
   "tournament:021:2026": {
     "data": {
@@ -8846,6 +8846,116 @@
       ],
       "timestamp": "2026-01-16T15:54:52.739000"
     },
-    "expiresAt": 1778762288054
+    "expiresAt": 1778766350162
+  },
+  "tournament:023:2026": {
+    "data": {
+      "orgId": "1",
+      "year": "2026",
+      "tournId": "023",
+      "name": "the Memorial Tournament presented by Workday",
+      "purse": 20000000,
+      "fedexCupPoints": 700,
+      "date": {
+        "start": "2026-06-04T00:00:00",
+        "end": "2026-06-07T00:00:00",
+        "weekNumber": "23"
+      },
+      "format": "stroke",
+      "status": "Not Started",
+      "currentRound": -1,
+      "timeZone": "America/New_York",
+      "courses": [
+        {
+          "courseId": "023",
+          "courseName": "Muirfield Village Golf Club",
+          "host": "Yes",
+          "location": {
+            "country": "USA",
+            "state": "Ohio",
+            "city": "Dublin"
+          },
+          "parFrontNine": "36",
+          "parBackNine": "36",
+          "parTotal": "72",
+          "holes": [
+            {
+              "holeId": 1,
+              "par": "4"
+            },
+            {
+              "holeId": 2,
+              "par": "4"
+            },
+            {
+              "holeId": 3,
+              "par": "4"
+            },
+            {
+              "holeId": 4,
+              "par": "3"
+            },
+            {
+              "holeId": 5,
+              "par": "5"
+            },
+            {
+              "holeId": 6,
+              "par": "4"
+            },
+            {
+              "holeId": 7,
+              "par": "5"
+            },
+            {
+              "holeId": 8,
+              "par": "3"
+            },
+            {
+              "holeId": 9,
+              "par": "4"
+            },
+            {
+              "holeId": 10,
+              "par": "4"
+            },
+            {
+              "holeId": 11,
+              "par": "5"
+            },
+            {
+              "holeId": 12,
+              "par": "3"
+            },
+            {
+              "holeId": 13,
+              "par": "4"
+            },
+            {
+              "holeId": 14,
+              "par": "4"
+            },
+            {
+              "holeId": 15,
+              "par": "5"
+            },
+            {
+              "holeId": 16,
+              "par": "3"
+            },
+            {
+              "holeId": 17,
+              "par": "4"
+            },
+            {
+              "holeId": 18,
+              "par": "4"
+            }
+          ]
+        }
+      ],
+      "timestamp": "2026-01-16T15:54:59.135000"
+    },
+    "expiresAt": 1778767231204
   }
 }
